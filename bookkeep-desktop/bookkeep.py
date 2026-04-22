@@ -885,11 +885,9 @@ class BookkeepApp:
         bbox = self.records_tree.bbox(row_id, '#7')
         if bbox:
             x, y, width, height = bbox
-            x += self.records_tree.winfo_rootx()
-            y += self.records_tree.winfo_rooty()
             
             self.ledger_change_combo = ttk.Combobox(
-                self.root,
+                self.records_tree,
                 values=ledger_names,
                 state='readonly',
                 width=15
