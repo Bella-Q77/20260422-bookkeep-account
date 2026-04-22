@@ -686,10 +686,24 @@ class BookkeepApp:
             self.records_tree.delete(item)
         
         for record in records:
-            type_text = "收入" if record[2] == 'income' else "支出"
-            amount_text = f"¥{record[4]:.2f}"
+            record_id = record[0]
+            date = record[1]
+            record_type_val = record[2]
+            category_name = record[3]
+            amount = record[4]
+            remark = record[5]
+            ledger_name = record[6]
+            
+            type_text = "收入" if record_type_val == 'income' else "支出"
+            amount_text = f"¥{amount:.2f}"
+            
+            if all([record_id, date, type_text, category_name, amount_text]):
+                ledger_display = ledger_name or ''
+            else:
+                ledger_display = ''
+            
             self.records_tree.insert('', tk.END, values=(
-                record[0], record[1], type_text, record[3], amount_text, record[5] or '', record[6] or ''
+                record_id, date, type_text, category_name, amount_text, remark or '', ledger_display
             ))
             
     def update_category_options(self):
