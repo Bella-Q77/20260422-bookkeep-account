@@ -293,7 +293,7 @@ class BookkeepApp:
         list_frame = ttk.Frame(frame)
         list_frame.pack(fill=tk.BOTH, expand=True, pady=10)
         
-        columns = ('id', 'date', 'type', 'category', 'amount', 'remark')
+        columns = ('id', 'date', 'type', 'category', 'amount', 'remark', 'ledger_change')
         self.records_tree = ttk.Treeview(list_frame, columns=columns, show='headings', height=15)
         
         self.records_tree.heading('id', text='ID')
@@ -302,6 +302,7 @@ class BookkeepApp:
         self.records_tree.heading('category', text='分类')
         self.records_tree.heading('amount', text='金额')
         self.records_tree.heading('remark', text='备注')
+        self.records_tree.heading('ledger_change', text='账本变更')
         
         self.records_tree.column('id', width=40)
         self.records_tree.column('date', width=100)
@@ -309,12 +310,16 @@ class BookkeepApp:
         self.records_tree.column('category', width=100)
         self.records_tree.column('amount', width=100)
         self.records_tree.column('remark', width=200)
+        self.records_tree.column('ledger_change', width=120)
         
         scrollbar = ttk.Scrollbar(list_frame, orient=tk.VERTICAL, command=self.records_tree.yview)
         self.records_tree.configure(yscrollcommand=scrollbar.set)
         
         self.records_tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.records_tree.bind('<Button-1>', self.on_treeview_click)
+        self.ledger_change_combo = None
         
         action_frame = ttk.Frame(frame)
         action_frame.pack(fill=tk.X, pady=5)
@@ -656,9 +661,10 @@ class BookkeepApp:
         self.filter_category_combo['values'] = ['all'] + [c[1] for c in all_categories]
         
         query = '''
-            SELECT r.id, r.date, r.type, c.name, r.amount, r.remark
+            SELECT r.id, r.date, r.type, c.name, r.amount, r.remark, l.name as ledger_name
             FROM records r
             JOIN categories c ON r.category_id = c.id
+            JOIN ledgers l ON r.ledger_id = l.id
             WHERE r.ledger_id = ? AND r.date LIKE ?
         '''
         params = [self.current_ledger_id, f"{month}%"]
@@ -683,7 +689,7 @@ class BookkeepApp:
             type_text = "收入" if record[2] == 'income' else "支出"
             amount_text = f"¥{record[4]:.2f}"
             self.records_tree.insert('', tk.END, values=(
-                record[0], record[1], type_text, record[3], amount_text, record[5] or ''
+                record[0], record[1], type_text, record[3], amount_text, record[5] or '', record[6] or ''
             ))
             
     def update_category_options(self):
@@ -822,6 +828,81 @@ class BookkeepApp:
         
         messagebox.showinfo("成功", "记录已删除")
         self.refresh_records()
+        
+    def on_treeview_click(self, event):
+        region = self.records_tree.identify('region', event.x, event.y)
+        if region == 'cell':
+            column = self.records_tree.identify_column(event.x)
+            if column == '#7':
+                self.hide_ledger_combo()
+                
+                row_id = self.records_tree.identify_row(event.y)
+                if row_id:
+                    self.records_tree.selection_set(row_id)
+                    self.show_ledger_combo(row_id, event.x, event.y)
+            else:
+                self.hide_ledger_combo()
+        else:
+            self.hide_ledger_combo()
+    
+    def show_ledger_combo(self, row_id, x, y):
+        item = self.records_tree.item(row_id)
+        record_id = item['values'][0]
+        if not record_id:
+            return
+        
+        self.changing_record_id = record_id
+        self.changing_row_id = row_id
+        
+        self.cursor.execute('SELECT id, name FROM ledgers')
+        ledgers = self.cursor.fetchall()
+        ledger_names = [l[1] for l in ledgers]
+        self.ledger_id_map = {l[1]: l[0] for l in ledgers}
+        
+        current_ledger_name = item['values'][6] if len(item['values']) > 6 else ''
+        
+        bbox = self.records_tree.bbox(row_id, '#7')
+        if bbox:
+            x, y, width, height = bbox
+            x += self.records_tree.winfo_rootx()
+            y += self.records_tree.winfo_rooty()
+            
+            self.ledger_change_combo = ttk.Combobox(
+                self.root,
+                values=ledger_names,
+                state='readonly',
+                width=15
+            )
+            self.ledger_change_combo.set(current_ledger_name)
+            self.ledger_change_combo.place(x=x, y=y, width=width, height=height)
+            self.ledger_change_combo.bind('<<ComboboxSelected>>', self.on_ledger_selected)
+            self.ledger_change_combo.bind('<FocusOut>', lambda e: self.hide_ledger_combo())
+            self.ledger_change_combo.focus_set()
+    
+    def hide_ledger_combo(self):
+        if self.ledger_change_combo:
+            self.ledger_change_combo.destroy()
+            self.ledger_change_combo = None
+    
+    def on_ledger_selected(self, event):
+        new_ledger_name = self.ledger_change_combo.get()
+        if hasattr(self, 'changing_record_id') and hasattr(self, 'ledger_id_map'):
+            new_ledger_id = self.ledger_id_map.get(new_ledger_name)
+            
+            self.cursor.execute('SELECT ledger_id FROM records WHERE id = ?', (self.changing_record_id,))
+            current_ledger_id = self.cursor.fetchone()
+            
+            if current_ledger_id and current_ledger_id[0] != new_ledger_id:
+                if messagebox.askyesno("确认", f"确定要将此记录移动到「{new_ledger_name}」吗？"):
+                    self.cursor.execute(
+                        'UPDATE records SET ledger_id = ? WHERE id = ?',
+                        (new_ledger_id, self.changing_record_id)
+                    )
+                    self.conn.commit()
+                    messagebox.showinfo("成功", "记录已移动到目标账本")
+                    self.refresh_records()
+        
+        self.hide_ledger_combo()
         
     def refresh_statistics(self):
         month = self.stats_month_var.get()
