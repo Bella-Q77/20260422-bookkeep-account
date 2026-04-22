@@ -847,19 +847,26 @@ class BookkeepApp:
     
     def show_ledger_combo(self, row_id, x, y):
         item = self.records_tree.item(row_id)
-        record_id = item['values'][0]
-        if not record_id:
+        values = item['values']
+        
+        record_id = values[0] if len(values) > 0 else None
+        date = values[1] if len(values) > 1 else None
+        record_type = values[2] if len(values) > 2 else None
+        category = values[3] if len(values) > 3 else None
+        amount = values[4] if len(values) > 4 else None
+        
+        if not all([record_id, date, record_type, category, amount]):
             return
         
         self.changing_record_id = record_id
         self.changing_row_id = row_id
         
-        self.cursor.execute('SELECT id, name FROM ledgers')
+        self.cursor.execute('SELECT id, name FROM ledgers ORDER BY id')
         ledgers = self.cursor.fetchall()
         ledger_names = [l[1] for l in ledgers]
         self.ledger_id_map = {l[1]: l[0] for l in ledgers}
         
-        current_ledger_name = item['values'][6] if len(item['values']) > 6 else ''
+        current_ledger_name = values[6] if len(values) > 6 else ''
         
         bbox = self.records_tree.bbox(row_id, '#7')
         if bbox:
@@ -876,8 +883,9 @@ class BookkeepApp:
             self.ledger_change_combo.set(current_ledger_name)
             self.ledger_change_combo.place(x=x, y=y, width=width, height=height)
             self.ledger_change_combo.bind('<<ComboboxSelected>>', self.on_ledger_selected)
-            self.ledger_change_combo.bind('<FocusOut>', lambda e: self.hide_ledger_combo())
+            self.ledger_change_combo.bind('<FocusOut>', lambda e: self.after(200, self.hide_ledger_combo))
             self.ledger_change_combo.focus_set()
+            self.ledger_change_combo.event_generate('<Button-1>')
     
     def hide_ledger_combo(self):
         if self.ledger_change_combo:
